@@ -3,7 +3,6 @@ services:
     image: rust:latest
     volumes:
       - ..:/workspace:cached
-      - repos:/repos/workspace
     command: /bin/sh -c "while sleep 1000; do :; done"
     network_mode: host
   minio:

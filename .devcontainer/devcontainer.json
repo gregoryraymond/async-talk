@@ -3,6 +3,6 @@
     "dockerComposeFile": "docker-compose.yml",
     "postAttachCommand": "apt update && apt install -y protobuf-compiler",
     "service": "minio-restream",
-    "workspaceFolder": "/repos/workspace",
+    "workspaceFolder": "/workspace",
     "shutdownAction": "stopCompose"
 }
