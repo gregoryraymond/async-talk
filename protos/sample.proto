@@ -1,0 +1,19 @@
+syntax="proto3";
+
+package sample;
+
+service FileService {
+    rpc StreamFile(FileStreamRequest) returns (stream FilePart);
+}
+
+message FileStreamRequest {
+    string filename = 1;
+    string transaction_id = 2;
+}
+
+message FilePart {
+    string transaction_id = 1;
+    int64 offset = 2;
+    int64 size = 3;
+    bytes content = 4;
+}

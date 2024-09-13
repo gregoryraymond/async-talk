@@ -1,0 +1,13 @@
+{
+    "recommendations": [
+        "tamasfe.even-better-toml",
+        "ms-azuretools.vscode-docker",
+        "dustypomerleau.rust-syntax",
+        "panicbit.cargo",
+        "fill-labs.dependi",
+        "tamasfe.even-better-toml",
+        "rust-lang.rust-analyzer",
+        "swellaby.vscode-rust-test-adapter",
+        "vadimcn.vscode-lldb"
+    ]
+}

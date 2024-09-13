@@ -1,0 +1,8 @@
+{
+    "name": "minio-restream",
+    "dockerComposeFile": "docker-compose.yml",
+    "postAttachCommand": "apt update && apt install -y protobuf-compiler",
+    "service": "minio-restream",
+    "workspaceFolder": "/repos/workspace",
+    "shutdownAction": "stopCompose"
+}
