@@ -8,7 +8,7 @@ async fn start_server() -> anyhow::Result<()> {
 
     let user = MinioFileService::default();
 
-    println!("FileService listening on {}", addr);
+    log::info!("FileService listening on {}", addr);
 
     Server::builder()
         // GrpcWeb is over http1 so we must enable it.
@@ -21,15 +21,16 @@ async fn start_server() -> anyhow::Result<()> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    env_logger::init();
     start_server().await?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{env, time::Duration};
+    use std::{env, process::exit, time::Duration};
 
-    use grpc::pb::{file_service_client::FileServiceClient, FilePart, FileStreamRequest};
+    use grpc::pb::{file_service_client::FileServiceClient, FilePart, FileStreamRequest, StreamerType};
     use minior::{core::upload::upload_object::UploadObjectAdditionalOptions, Minio};
     use tokio::fs::File;
     use tokio_stream::StreamExt;
@@ -39,6 +40,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_client_6_mb_file() -> anyhow::Result<()> {
+        env_logger::init();
         env::set_var("AWS_REGION", "us-east-1");
         env::set_var("AWS_ACCESS_KEY_ID", "testingpass");
         env::set_var("AWS_SECRET_ACCESS_KEY", "testingpass");
@@ -54,21 +56,35 @@ mod tests {
 
         tokio::select!(
             _ = start_server() => {
-                log::warn!("Server exited");
+                log::info!("Server exited");
             },
             _ = async {
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                tokio::time::sleep(Duration::from_secs(2)).await;
                 let mut fs_client = FileServiceClient::connect("http://127.0.0.1:3000").await.expect("No file service conn");
 
-                let mut res_stream = fs_client.stream_file(FileStreamRequest { 
+                log::info!("Starting testing...");
+                let res_stream = fs_client.stream_file(FileStreamRequest { 
                     filename: String::from("6mbfile.txt"),
-                    transaction_id: String::from("transaction #1")
+                    transaction_id: String::from("transaction #1"),
+                    stream_type: StreamerType::SimplerBetter.into()
                 }).await.expect("No file stream");
 
                 type FilePartResults = Vec<Result<FilePart, Status>>;
                 let responses = res_stream.into_inner().collect::<FilePartResults>().await;
 
                 assert_eq!(2, responses.len());
+                log::info!("Finished DeepDived response.");
+
+                let res_stream_simpler = fs_client.stream_file(FileStreamRequest { 
+                    filename: String::from("6mbfile.txt"),
+                    transaction_id: String::from("transaction #2"),
+                    stream_type: StreamerType::DeepDived.into()
+                }).await.expect("No file stream");
+
+                let responses_simpler = res_stream_simpler.into_inner().collect::<FilePartResults>().await;
+
+                assert_eq!(2, responses_simpler.len());
+                log::info!("Finished SimplerBetter reponse.");
             } => {
                 log::info!("Client exited.");
             }

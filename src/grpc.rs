@@ -2,16 +2,16 @@ pub mod pb {
     tonic::include_proto!("sample");
 }
 
-use std::{borrow::BorrowMut, cell::{RefCell, RefMut}, fmt::Display, io::Write, pin::Pin, task::Poll};
-use pb::FilePart;
+use std::{cell::{RefCell, RefMut}, fmt::Display, pin::Pin, task::Poll};
+use pb::{FilePart, StreamerType};
 use tokio_stream::Stream;
 use std::task::ready;
 use std::pin::pin;
 use std::future::Future;
 use tonic::{Response, Status, Result};
 use minior::Minio;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt};
-use bytes::{Buf, BufMut, BytesMut};
+use tokio::io::{AsyncBufRead, AsyncReadExt};
+use bytes::{Buf, BytesMut};
 
 use crate::grpc::pb::FileStreamRequest;
 
@@ -32,6 +32,7 @@ impl<T, E: Display> IntoGrpcError<T> for Result<T, E> {
 }
 
 pub struct MinioObjectStream {
+    // Hacking around, don't copy my use of RefCell or BytesMut please.
     receive_buffer: RefCell<BytesMut>,
     // If we are passing it back it must be Send
     // because it's dyn we need a box
@@ -106,8 +107,6 @@ impl Stream for MinioObjectStream
 
 impl MinioFileService {
     async fn connect_to_minio(&self) -> anyhow::Result<Minio> {
-        env_logger::init(); // Note: set environment variable RUST_LOG="INFO" to log info and higher
-
         let base_url = "http://127.0.0.1:9000";
 
         log::info!("Trying to connect to MinIO at: `{:?}`", base_url);
@@ -126,7 +125,7 @@ impl pb::file_service_server::FileService for MinioFileService {
         let client = match self.connect_to_minio().await {
             Ok(x) => x,
             Err(e) => {
-                log::error!("Couldn't connect {}", e);
+                log::info!("Couldn't connect {}", e);
                 return Err(Status::failed_precondition("Couldn't connect to upstream server."));
             }
         };
@@ -142,37 +141,42 @@ impl pb::file_service_server::FileService for MinioFileService {
             }
         };
 
-        // let stream = async_stream::stream! {
-        //     let transaction_id = file_request.get_ref().transaction_id.clone();
-        //     let mut buffer = BytesMut::with_capacity(4000000);
-        //     let mut offset = 0i64;
-        //     while let size = file_stream.read_buf(&mut buffer).await? {
-        //         yield Ok(FilePart {
-        //             transaction_id: transaction_id.clone(),
-        //             offset: offset,
-        //             size: 0,
-        //             content: buffer.to_vec(),
-        //         });
-        //         offset += size as i64;
-        //         buffer.clear();
-        //     }
-        // };
+        match StreamerType::try_from(file_request.get_ref().stream_type).into_grpc_result()? {
+            StreamerType::DeepDived => {
+               let stream = async_stream::stream! {
+                    let transaction_id = file_request.get_ref().transaction_id.clone();
+                    let mut buffer = BytesMut::with_capacity(4000000);
+                    let mut offset = 0i64;
+                    while let size = file_stream.read_buf(&mut buffer).await? {
+                        yield Ok(FilePart {
+                            transaction_id: transaction_id.clone(),
+                            offset: offset,
+                            size: 0,
+                            content: buffer.to_vec(),
+                        });
+                        offset += size as i64;
+                        buffer.clear();
+                    }
+                };
 
-        // Ok(Response::new(
-        //     Box::pin(stream) as Self::StreamFileStream
-        // ))
+                Ok(Response::new(
+                    Box::pin(stream) as Self::StreamFileStream
+                ))
+            }, 
+            StreamerType::SimplerBetter => {
+                // Guess what the max size for a message in grpc is 4MB
+                let wrapped_stream = MinioObjectStream {
+                    receive_buffer: RefCell::new(BytesMut::with_capacity(4_000_000)), 
+                    receive_source: RefCell::new(Box::pin(file_stream)), 
+                    transaction_id: file_request.get_ref().transaction_id.clone(), 
+                    current_offset: RefCell::new(0), 
+                    total_size: 0 // Should get it from minio first I guess
+                };        
 
-        // Guess what the max size for a message in grpc is 4MB
-        let wrapped_stream = MinioObjectStream {
-            receive_buffer: RefCell::new(BytesMut::with_capacity(4_000_000)), 
-            receive_source: RefCell::new(Box::pin(file_stream)), 
-            transaction_id: file_request.get_ref().transaction_id.clone(), 
-            current_offset: RefCell::new(0), 
-            total_size: 0 // Should get it from minio first I guess
-        };        
-
-        Ok(Response::new(
-            Box::pin(wrapped_stream) as Self::StreamFileStream
-        ))
+                Ok(Response::new(
+                    Box::pin(wrapped_stream) as Self::StreamFileStream
+                ))
+            }
+        }
     }
 }

@@ -6,9 +6,15 @@ service FileService {
     rpc StreamFile(FileStreamRequest) returns (stream FilePart);
 }
 
+enum StreamerType {
+    DEEP_DIVED = 0;
+    SIMPLER_BETTER = 1;
+}
+
 message FileStreamRequest {
     string filename = 1;
     string transaction_id = 2;
+    StreamerType stream_type = 3;
 }
 
 message FilePart {
